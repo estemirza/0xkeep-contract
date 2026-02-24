@@ -1,0 +1,211 @@
+ZEROXKEEP LOCKER
+SMART CONTRACT AUDIT REPORT
+Version: Solidity ^0.8.19
+Contract: ZeroXKeepLocker
+Date: 2026-01-28
+
+========================================
+AUDIT SCOPE
+
+This audit covers the following contract:
+
+ZeroXKeepLocker.sol
+
+Features reviewed:
+
+Standard ERC20 token locking
+
+Linear vesting mechanism
+
+Fee handling and transfers
+
+Token accounting (including fee-on-transfer tokens)
+
+Reentrancy protection
+
+Event emissions
+
+Out of scope:
+
+Frontend implementation
+
+Deployment configuration
+
+Off-chain services
+
+========================================
+SUMMARY
+
+The ZeroXKeepLocker contract is well-structured and follows modern Solidity security practices. The implementation demonstrates awareness of common vulnerabilities such as reentrancy, fee-on-transfer tokens, and unsafe ERC20 interactions.
+
+No critical fund-draining vulnerabilities were found.
+However, several medium and low severity issues were identified that should be addressed before production deployment to improve robustness, UX, and audit-readiness.
+
+Overall Security Assessment: GOOD (8.5 / 10)
+
+========================================
+FINDINGS OVERVIEW
+Severity	Issues
+High	0
+Medium	3
+Low	3
+Informational	2
+========================================
+DETAILED FINDINGS
+[M-01] Missing Array Bounds Validation
+
+Description:
+The contract accesses userLocks and userVestings arrays directly using user-supplied indices without validating bounds.
+
+Affected code:
+
+withdrawLock()
+
+claimVesting()
+
+Example:
+userLocks[_token][msg.sender][_lockId];
+
+Impact:
+If an invalid ID is provided, the transaction reverts with a low-level panic instead of a descriptive error. This negatively affects UX and is commonly flagged during audits.
+
+Risk Level: Medium
+
+Recommendation:
+Explicitly check array length before accessing.
+
+Recommended Fix:
+
+require(_lockId < userLocks[_token][msg.sender].length, "Invalid lock ID");
+require(_vestingId < userVestings[_token][msg.sender].length, "Invalid vesting ID");
+
+[M-02] Fee Receiver Single Point of Failure
+
+Description:
+Fees are forwarded immediately using a low-level call. If the feeReceiver is a smart contract that reverts or becomes incompatible, all lock and vesting operations will fail.
+
+Affected code:
+_payFee()
+
+Impact:
+Operational risk. Contract functionality can be permanently blocked.
+
+Risk Level: Medium
+
+Recommendation:
+One of the following should be implemented:
+
+Restrict feeReceiver to an EOA
+
+Accumulate fees and allow manual withdrawal
+
+Add emergency feeReceiver update via governance
+
+Add fallback mechanism for failed fee transfers
+
+[M-03] No Emergency Recovery or Admin Controls
+
+Description:
+There is no mechanism to recover accidentally sent tokens or respond to unexpected token behavior.
+
+Impact:
+Operational risk and user support burden.
+
+Risk Level: Medium
+
+Recommendation:
+Implement a minimal rescue function or time-locked admin recovery.
+
+Example:
+
+function rescueToken(address token, uint256 amount) external onlyOwner {
+    IERC20(token).safeTransfer(owner(), amount);
+}
+
+[L-01] Timestamp Dependency for Vesting
+
+Description:
+Vesting calculations depend on block.timestamp, which can be slightly manipulated by validators.
+
+Impact:
+Negligible for long vesting durations, but imprecise for short ones.
+
+Risk Level: Low
+
+Recommendation:
+Document minimum vesting duration or accept as standard industry risk.
+
+[L-02] Flat Fee Regardless of Lock Size
+
+Description:
+Lock and vesting fees are fixed regardless of token amount or duration.
+
+Impact:
+Potential spam usage or inefficient pricing for large lockers.
+
+Risk Level: Low (Business Logic)
+
+Recommendation:
+Optional future improvement: tiered fees or minimum lock amounts.
+
+[L-03] No Pause / Circuit Breaker
+
+Description:
+The contract cannot be paused in case of emergencies.
+
+Impact:
+Limits ability to respond to discovered vulnerabilities.
+
+Risk Level: Low
+
+Recommendation:
+Consider implementing Pausable from OpenZeppelin.
+
+[I-01] No Getter Helpers for Frontend
+
+Description:
+Nested mappings with arrays are difficult to query efficiently from frontends.
+
+Impact:
+Developer experience only.
+
+Recommendation:
+Add view functions to retrieve user locks and vestings.
+
+[I-02] No NatSpec Documentation
+
+Description:
+Functions lack NatSpec comments.
+
+Impact:
+Readability and audit clarity.
+
+Recommendation:
+Add NatSpec comments for public/external functions.
+
+========================================
+POSITIVE OBSERVATIONS
+
+Proper use of SafeERC20
+
+Reentrancy protection applied correctly
+
+Fee-on-transfer token safe accounting
+
+State updates occur before external calls
+
+No owner-controlled withdrawal of user funds
+
+Immutable fee configuration
+
+Clear and indexed event emissions
+
+========================================
+FINAL VERDICT
+
+The ZeroXKeepLocker contract is secure, cleanly written, and suitable for deployment after addressing the medium severity findings.
+
+Once array bounds checks and fee handling robustness are improved, the contract meets industry standards for a public liquidity locker on Base Mainnet.
+
+========================================
+END OF REPORT

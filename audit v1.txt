@@ -1,0 +1,236 @@
+====================================================
+SMART CONTRACT AUDIT REPORT
+Project: ZeroXKeepLocker (0xKeep)
+====================================================
+
+Audit Scope:
+-------------
+Contract Name: ZeroXKeepLocker
+Solidity Version: ^0.8.19
+Libraries Used:
+- OpenZeppelin IERC20
+- OpenZeppelin SafeERC20
+- OpenZeppelin ReentrancyGuard
+
+Audit Type:
+------------
+Manual static review (logic, security, economic safety)
+
+====================================================
+SUMMARY
+====================================================
+
+The ZeroXKeepLocker contract implements:
+1. Standard token locking with time-based unlock
+2. Linear vesting (drip) token release
+3. Immutable ETH-based fee system
+
+The contract is generally well-written and follows
+best practices including reentrancy protection,
+checks-effects-interactions, and safe ERC20 handling.
+
+No critical vulnerabilities were found.
+Some medium and low severity issues were identified,
+mainly related to validation, gas optimization,
+and trust hardening.
+
+Overall Risk Rating: LOW 🟢
+
+====================================================
+ISSUES FOUND
+====================================================
+
+----------------------------------------------------
+[MEDIUM] Missing Token Address Validation
+----------------------------------------------------
+
+Description:
+------------
+Functions that accept a token address do not validate
+that the address is non-zero.
+
+Affected Functions:
+-------------------
+- lockToken()
+- withdrawLock()
+- createVesting()
+- claimVesting()
+
+Impact:
+-------
+- Users may lock tokens using address(0)
+- Creates unusable lock entries
+- May cause frontend or indexer issues
+- Common audit red flag
+
+Current Code (example):
+-----------------------
+function lockToken(address _token, uint256 _amount, uint256 _unlockTime) external payable nonReentrant {
+    require(msg.value == LOCK_FEE, "Incorrect Lock Fee");
+    require(_amount > 0, "Amount must be > 0");
+    require(_unlockTime > block.timestamp, "Unlock time must be in future");
+}
+
+Recommended Fix:
+----------------
+Add token validation at the start of each function.
+
+Code to ADD:
+------------
+require(_token != address(0), "Invalid token address");
+
+Example Fixed Code:
+-------------------
+function lockToken(address _token, uint256 _amount, uint256 _unlockTime) external payable nonReentrant {
+    require(_token != address(0), "Invalid token address");
+    require(msg.value == LOCK_FEE, "Incorrect Lock Fee");
+    require(_amount > 0, "Amount must be > 0");
+    require(_unlockTime > block.timestamp, "Unlock time must be in future");
+}
+
+----------------------------------------------------
+[MEDIUM] Fee Receiver Is Not Immutable
+----------------------------------------------------
+
+Description:
+------------
+The feeReceiver address is declared as a mutable
+storage variable instead of immutable.
+
+Although no setter exists, auditors and users may
+perceive future upgrade or admin risk.
+
+Current Code:
+-------------
+address payable public feeReceiver;
+
+Impact:
+-------
+- Trust and perception risk
+- Unnecessary storage slot usage
+- Slightly higher gas cost
+
+Recommended Fix:
+----------------
+Declare feeReceiver as immutable.
+
+Code to CHANGE:
+---------------
+FROM:
+address payable public feeReceiver;
+
+TO:
+address payable public immutable feeReceiver;
+
+Also update constructor validation.
+
+Current Constructor:
+--------------------
+constructor(uint256 _lockFee, uint256 _vestingFee, address _feeReceiver) {
+    LOCK_FEE = _lockFee;
+    VESTING_FEE = _vestingFee;
+    feeReceiver = payable(_feeReceiver);
+}
+
+Recommended Constructor:
+------------------------
+constructor(uint256 _lockFee, uint256 _vestingFee, address _feeReceiver) {
+    require(_feeReceiver != address(0), "Invalid fee receiver");
+    LOCK_FEE = _lockFee;
+    VESTING_FEE = _vestingFee;
+    feeReceiver = payable(_feeReceiver);
+}
+
+----------------------------------------------------
+[LOW] Gas Inefficiency: String Usage in Events
+----------------------------------------------------
+
+Description:
+------------
+The Withdrawn event uses a string parameter to
+distinguish lock type.
+
+Current Code:
+-------------
+event Withdrawn(address indexed token, address indexed user, uint256 amount, string lockType, uint256 id);
+
+Impact:
+-------
+- Higher gas cost
+- Less indexer-friendly
+- Not optimal for frequent calls
+
+Recommended Fix:
+----------------
+Use an enum instead of string.
+
+Suggested Code Change:
+----------------------
+enum LockType { LOCK, VESTING }
+
+event Withdrawn(
+    address indexed token,
+    address indexed user,
+    uint256 amount,
+    LockType lockType,
+    uint256 id
+);
+
+Example Emit:
+-------------
+emit Withdrawn(_token, msg.sender, amount, LockType.LOCK, _lockId);
+
+----------------------------------------------------
+[LOW] Array-Based Storage Scalability
+----------------------------------------------------
+
+Description:
+------------
+User locks and vestings are stored in dynamic arrays.
+
+Current Code:
+-------------
+mapping(address => mapping(address => LockInfo[])) public userLocks;
+mapping(address => mapping(address => VestingInfo[])) public userVestings;
+
+Impact:
+-------
+- Gas cost increases as arrays grow
+- No deletion or pagination
+- Acceptable for v1 but not ideal for heavy users
+
+Recommendation:
+---------------
+This is acceptable for v1.
+For v2, consider:
+- ID-based mappings
+- View helper functions
+- Pagination support
+
+====================================================
+POSITIVE OBSERVATIONS
+====================================================
+
+✔ Reentrancy protection on all external functions
+✔ Immutable fee model (LOCK_FEE, VESTING_FEE)
+✔ Safe handling of deflationary / tax tokens
+✔ Correct linear vesting math
+✔ Proper state updates before external calls
+✔ No owner privileges or backdoors
+
+====================================================
+FINAL VERDICT
+====================================================
+
+The ZeroXKeepLocker contract is SAFE for deployment
+after applying the recommended medium-severity fixes.
+
+No critical vulnerabilities were discovered.
+
+With minor hardening, this contract meets industry
+standards for a public liquidity locker on Base or
+Ethereum-compatible networks.
+
+====================================================
+Audit Status: PASSED (with recommendations)
+====================================================

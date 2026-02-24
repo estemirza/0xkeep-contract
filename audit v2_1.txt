@@ -1,0 +1,246 @@
+========================================================================
+SMART CONTRACT AUDIT REPORT: ZeroXKeepLocker
+========================================================================
+Date: October 26, 2023
+Language: Solidity ^0.8.19
+Audit Status: PASSED (With Recommendations)
+Security Score: 9/10
+========================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------
+The `ZeroXKeepLocker` contract provides standard token locking and linear 
+vesting functionality. It correctly utilizes OpenZeppelin standards for 
+ERC20 safety and Reentrancy protection. The logic for Fee-on-Transfer 
+tokens is correctly implemented using the "balance-before-and-after" 
+check.
+
+There are no Critical or High-severity vulnerabilities that would allow 
+theft of funds or manipulation of unlocking schedules by unauthorized 
+users.
+
+However, there are risks regarding "Rebase/Elastic Supply" tokens and 
+potential Denial of Service (DoS) scenarios involving the fee receiver, 
+which are detailed below.
+
+========================================================================
+
+2. FINDINGS & SEVERITY
+--------------------
+
+[MEDIUM] 1. Incompatibility with Negative Rebase Tokens
+   - Description: The contract calculates the `actualAmount` at the 
+     time of deposit and stores this value statically. If a token has 
+     a "negative rebase" (deflationary supply adjustment) while locked, 
+     the contract's actual balance will drop below the stored `amount`.
+   - Consequence: When the user tries to withdraw, the contract will 
+     attempt to transfer the original amount, which it no longer holds. 
+     The transaction will revert, permanently locking the remaining tokens.
+   - Recommendation: Explicitly disallow Rebase tokens in documentation 
+     or implemented a "Shares" model (complex).
+
+[MEDIUM] 2. Immutable Fee Receiver (DoS Risk)
+   - Description: `feeReceiver` is immutable and set in the constructor. 
+     The `_payFee` function uses `call` to send ETH.
+   - Consequence: If the `feeReceiver` address is a smart contract that 
+     does not accept ETH (no `receive` function) or reverts, NO users 
+     will be able to lock or create vestings. Since the variable is 
+     immutable, the contract would have to be abandoned.
+   - Recommendation: Make `feeReceiver` updatable by an owner, or ensure 
+     rigorous checks that the address is an EOA (Externally Owned Account).
+
+[LOW] 3. Immutable Pricing
+   - Description: `LOCK_FEE` and `VESTING_FEE` are immutable.
+   - Consequence: If the price of the native chain coin (ETH/BNB) 
+     fluctuates significantly, the fees may become prohibitively 
+     expensive or practically free.
+   - Recommendation: Implement an `onlyOwner` function to update fees.
+
+[INFO] 4. Strict ETH Equality Check
+   - Description: `require(msg.value == LOCK_FEE)`
+   - Consequence: If a user sends slightly more ETH (common in some 
+     dApps to ensure success), the transaction fails.
+   - Recommendation: Use `msg.value >= LOCK_FEE` and refund the dust, 
+     or keep as is for strictness.
+
+========================================================================
+
+3. CODE FIX RECOMMENDATIONS
+--------------------
+Below is the refactored code addressing the issues above. 
+Major changes: added `Ownable` for fee management and relaxed ETH checks.
+
+FILE: ZeroXKeepLocker_Fixed.sol
+------------------------------------------------------------------------
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol"; // Added Ownable
+
+contract ZeroXKeepLocker is ReentrancyGuard, Ownable {
+    using SafeERC20 for IERC20;
+
+    enum LockType { STANDARD, VESTING }
+
+    // --- CONFIG (Mutable to prevent obsolescence) ---
+    uint256 public lockFee;
+    uint256 public vestingFee;
+    address payable public feeReceiver;
+
+    struct LockInfo {
+        uint256 amount;
+        uint256 unlockTime;
+        bool withdrawn;
+    }
+
+    struct VestingInfo {
+        uint256 totalAmount;
+        uint256 claimedAmount;
+        uint256 startTime;
+        uint256 duration;
+    }
+
+    mapping(address => mapping(address => LockInfo[])) public userLocks;
+    mapping(address => mapping(address => VestingInfo[])) public userVestings;
+
+    event Locked(address indexed token, address indexed user, uint256 amount, uint256 unlockTime, uint256 lockId);
+    event Vested(address indexed token, address indexed user, uint256 amount, uint256 duration, uint256 vestingId);
+    event Withdrawn(address indexed token, address indexed user, uint256 amount, LockType lockType, uint256 id);
+    event FeesUpdated(uint256 lockFee, uint256 vestingFee);
+    event FeeReceiverUpdated(address newReceiver);
+
+    // Initialize Ownable
+    constructor(uint256 _lockFee, uint256 _vestingFee, address _feeReceiver) Ownable() {
+        require(_feeReceiver != address(0), "Invalid fee receiver");
+        lockFee = _lockFee;
+        vestingFee = _vestingFee;
+        feeReceiver = payable(_feeReceiver);
+    }
+
+    // --- ADMIN FUNCTIONS (Fixes Risk #2 & #3) ---
+    function setFees(uint256 _lockFee, uint256 _vestingFee) external onlyOwner {
+        lockFee = _lockFee;
+        vestingFee = _vestingFee;
+        emit FeesUpdated(_lockFee, _vestingFee);
+    }
+
+    function setFeeReceiver(address _newReceiver) external onlyOwner {
+        require(_newReceiver != address(0), "Invalid address");
+        feeReceiver = payable(_newReceiver);
+        emit FeeReceiverUpdated(_newReceiver);
+    }
+
+    // --- MAIN LOGIC ---
+
+    function lockToken(address _token, uint256 _amount, uint256 _unlockTime) external payable nonReentrant {
+        require(_token != address(0), "Invalid token");
+        // Fix #4: Allow >= and verify Rebase incompatibility in docs
+        require(msg.value >= lockFee, "Insufficient Fee"); 
+        require(_amount > 0, "Amount > 0");
+        require(_unlockTime > block.timestamp, "Future only");
+
+        _payFee(lockFee); // Pay exact fee
+        
+        uint256 actualAmount = _transferTokensIn(_token, _amount);
+
+        userLocks[_token][msg.sender].push(LockInfo({
+            amount: actualAmount,
+            unlockTime: _unlockTime,
+            withdrawn: false
+        }));
+
+        emit Locked(_token, msg.sender, actualAmount, _unlockTime, userLocks[_token][msg.sender].length - 1);
+    }
+
+    function withdrawLock(address _token, uint256 _lockId) external nonReentrant {
+        LockInfo storage lock = userLocks[_token][msg.sender][_lockId];
+        
+        require(!lock.withdrawn, "Already withdrawn");
+        require(block.timestamp >= lock.unlockTime, "Still locked");
+        require(lock.amount > 0, "Nothing to withdraw");
+
+        lock.withdrawn = true;
+        uint256 amount = lock.amount;
+        lock.amount = 0;
+
+        IERC20(_token).safeTransfer(msg.sender, amount);
+        
+        emit Withdrawn(_token, msg.sender, amount, LockType.STANDARD, _lockId);
+    }
+
+    function createVesting(address _token, uint256 _amount, uint256 _durationSeconds) external payable nonReentrant {
+        require(_token != address(0), "Invalid token");
+        require(msg.value >= vestingFee, "Insufficient Fee");
+        require(_amount > 0, "Amount > 0");
+        require(_durationSeconds > 0, "Duration > 0");
+
+        _payFee(vestingFee);
+        
+        uint256 actualAmount = _transferTokensIn(_token, _amount);
+
+        userVestings[_token][msg.sender].push(VestingInfo({
+            totalAmount: actualAmount,
+            claimedAmount: 0,
+            startTime: block.timestamp,
+            duration: _durationSeconds
+        }));
+
+        emit Vested(_token, msg.sender, actualAmount, _durationSeconds, userVestings[_token][msg.sender].length - 1);
+    }
+
+    function claimVesting(address _token, uint256 _vestingId) external nonReentrant {
+        VestingInfo storage vest = userVestings[_token][msg.sender][_vestingId];
+        
+        require(vest.totalAmount > vest.claimedAmount, "Fully claimed");
+
+        uint256 timePassed = block.timestamp - vest.startTime;
+        uint256 totalUnlocked;
+        
+        if (timePassed >= vest.duration) {
+            totalUnlocked = vest.totalAmount;
+        } else {
+            totalUnlocked = (vest.totalAmount * timePassed) / vest.duration;
+        }
+
+        uint256 claimable = totalUnlocked - vest.claimedAmount;
+        require(claimable > 0, "Nothing new");
+
+        vest.claimedAmount += claimable;
+
+        IERC20(_token).safeTransfer(msg.sender, claimable);
+        
+        emit Withdrawn(_token, msg.sender, claimable, LockType.VESTING, _vestingId);
+    }
+
+    // --- HELPERS ---
+
+    function _payFee(uint256 _feeAmount) internal {
+        if (_feeAmount == 0) return;
+        
+        // Transfer Fee to Receiver
+        (bool success, ) = feeReceiver.call{value: _feeAmount}("");
+        require(success, "Fee transfer failed");
+
+        // Refund excess ETH to user if they overpaid
+        uint256 refund = msg.value - _feeAmount;
+        if (refund > 0) {
+            (bool refundSuccess, ) = msg.sender.call{value: refund}("");
+            // We do not require refund success to prevent griefing
+            // but in production, careful handling of this is advised.
+        }
+    }
+
+    function _transferTokensIn(address _token, uint256 _amount) internal returns (uint256) {
+        IERC20 token = IERC20(_token);
+        uint256 balanceBefore = token.balanceOf(address(this));
+        token.safeTransferFrom(msg.sender, address(this), _amount);
+        uint256 balanceAfter = token.balanceOf(address(this));
+        uint256 actualAmount = balanceAfter - balanceBefore;
+        require(actualAmount > 0, "No tokens received");
+        return actualAmount;
+    }
+}
