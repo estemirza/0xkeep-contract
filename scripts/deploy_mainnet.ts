@@ -15,7 +15,7 @@ async function main() {
 
   // --- CONFIGURATION (FINAL CHECK) ---
   // 1. Set Prices
-  const LOCK_FEE = ethers.parseEther("0.05");    // 0.05 ETH (Premium)
+  const LOCK_FEE = ethers.parseEther("0.03");    // 0.03 ETH (Premium)
   const VESTING_FEE = ethers.parseEther("0.02"); // 0.02 ETH (Volume)
   
   // 2. Set Fee Receiver
