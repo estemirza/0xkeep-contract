@@ -15,6 +15,12 @@ const config: HardhatUserConfig = {
     },
   },
   networks: {
+    // 1. BASE SEPOLIA
+    baseSepolia: {
+      url: "https://sepolia.base.org",
+      accounts: process.env.PRIVATE_KEY_TEST ? [process.env.PRIVATE_KEY_TEST] : [],
+      chainId: 84532,
+    },
     // 1. BASE MAINNET
     base: {
       url: "https://mainnet.base.org",
