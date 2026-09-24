@@ -8,9 +8,11 @@ App: https://app.0x-keep.xyz · Site: https://0x-keep.xyz · Security page: http
 
 | Chain | Chain ID | Address | Lock fee | Vesting fee |
 |---|---|---|---|---|
-| Base | 8453 | `0x49bF4Ded143402B2fD89d8d284e477Dfdc9fa02B` | 0.03 ETH | 0.02 ETH |
+| Base (used by app) | 8453 | `0x048d1326B3b0531A5d043984F4e495285B07af4B` | 0 | 0 |
 | Arbitrum One | 42161 | `0xDC9bFb15C28486590Cbf58F3FEA9ADbEB9B0334c` | 0.03 ETH | 0.02 ETH |
 | Optimism | 10 | `0x1Ecf87D69c4a5c8D10ffb7D73e8ABB415043f866` | 0.03 ETH | 0.02 ETH |
+
+Also on Base, not used by the app: `0x49bF4Ded143402B2fD89d8d284e477Dfdc9fa02B` (original 0.03 / 0.02 deployment) and `0x6D729a7bda1E9Da1c8e74351fd8C242316381Efd` (identical 0-fee copy, deployed twice by mistake).
 
 Source is verified on Sourcify (`https://repo.sourcify.dev/<chainId>/<address>`). Fee receiver on all chains: `0x28B8cafb1c95E375E349283D63919039eB17c229`.
 

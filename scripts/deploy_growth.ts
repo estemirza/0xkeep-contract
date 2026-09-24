@@ -59,18 +59,15 @@ async function main() {
   const contractAddress = await locker.getAddress();
   const deployTx = locker.deploymentTransaction();
 
-  // Read the fees back from chain so the record reflects reality.
-  const onchainLockFee = await locker.LOCK_FEE();
-  const onchainVestFee = await locker.VESTING_FEE();
-
-  const record = {
+  // Save the address FIRST, so a later RPC hiccup can never lose it.
+  const record: Record<string, unknown> = {
     network: net.toUpperCase(),
     instance: "growth",
     chainId: network.config.chainId,
     contractAddress,
     feeReceiver: FEE_RECEIVER,
-    lockFee: ethers.formatEther(onchainLockFee),
-    vestingFee: ethers.formatEther(onchainVestFee),
+    lockFee: ethers.formatEther(LOCK_FEE),
+    vestingFee: ethers.formatEther(VESTING_FEE),
     deployTx: deployTx?.hash,
     deployedAt: new Date().toISOString(),
     deployer: deployer.address,
@@ -78,6 +75,20 @@ async function main() {
   fs.writeFileSync(outFile, JSON.stringify(record, null, 2));
   console.log(`✅ Deployed at ${contractAddress}`);
   console.log(`💾 Saved to deployments/${net}-growth.json`);
+
+  // Read fees back from chain. Load-balanced RPCs can lag a block or two
+  // behind the one that confirmed the deploy (returns "0x"), so retry.
+  for (let i = 1; i <= 6; i++) {
+    try {
+      const lf = await locker.LOCK_FEE();
+      const vf = await locker.VESTING_FEE();
+      console.log(`🔎 On-chain fees: lock ${ethers.formatEther(lf)} ETH, vesting ${ethers.formatEther(vf)} ETH`);
+      break;
+    } catch {
+      if (i === 6) console.log("⚠️  Could not read fees back yet. Check them on Basescan (Read Contract).");
+      else await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
 
   console.log("⏳ Waiting 20s before verification...");
   await new Promise((r) => setTimeout(r, 20000));
