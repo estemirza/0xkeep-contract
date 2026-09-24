@@ -1,57 +1,48 @@
-# Sample Hardhat 3 Beta Project (`mocha` and `ethers`)
+# 0xKeep — Liquidity Locker & Linear Vesting (V12)
 
-This project showcases a Hardhat 3 Beta project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+Immutable, non-custodial ERC-20 locker and linear-vesting contract. No owner, no admin, no pause, no proxy. Fees and fee receiver are fixed at deployment.
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+App: https://app.0x-keep.xyz · Site: https://0x-keep.xyz · Security page: https://0x-keep.xyz/security.html
 
-## Project Overview
+## Deployments
 
-This example project includes:
+| Chain | Chain ID | Address | Lock fee | Vesting fee |
+|---|---|---|---|---|
+| Base | 8453 | `0x49bF4Ded143402B2fD89d8d284e477Dfdc9fa02B` | 0.03 ETH | 0.02 ETH |
+| Arbitrum One | 42161 | `0xDC9bFb15C28486590Cbf58F3FEA9ADbEB9B0334c` | 0.03 ETH | 0.02 ETH |
+| Optimism | 10 | `0x1Ecf87D69c4a5c8D10ffb7D73e8ABB415043f866` | 0.03 ETH | 0.02 ETH |
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+Source is verified on Sourcify (`https://repo.sourcify.dev/<chainId>/<address>`). Fee receiver on all chains: `0x28B8cafb1c95E375E349283D63919039eB17c229`.
 
-## Usage
+## Audit status
 
-### Running Tests
+Not audited by a third-party firm. The contract has had an internal review (no critical/high/medium/low findings, two informational notes) and is covered by the test suite below. An internal review is not an independent audit.
 
-To run all the tests in the project, execute the following command:
+## Tests
 
 ```shell
+npm install
 npx hardhat test
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+| File | What it covers |
+|---|---|
+| `test/LockTest.ts` | Deployment, lock and vesting happy paths, validations, extend/transfer/withdraw, cliff logic, view functions |
+| `test/EdgeCaseTest.ts` | Array integrity across many locks, ownership transfer chains, fee handling, vesting precision, multi-user isolation, uint96 guard, 1-day minimum |
+| `test/AdversarialEdgeTest.ts` | Fee-on-transfer, rebasing, uint96/uint32 boundaries, vesting dust, reentrancy, non-standard ERC20s, fee-receiver liveness, refund failure |
+| `test/GrowthInstanceTest.ts` | The same contract deployed with zero fees |
 
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
-```
+## Known limitations
 
-### Make a deployment to Sepolia
+- **Rebasing tokens:** a negative rebase inside the contract makes that lock's withdrawal revert. Don't lock rebasing tokens.
+- **Fee receiver:** if the receiver ever rejected ETH, new locks/vestings would revert. Withdrawals and claims don't depend on it.
+- **Immutable:** a bug can't be patched, only redeployed.
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+## Deploying
 
-To run the deployment to a local chain:
+- `scripts/deploy_mainnet.ts`: original 0.03 / 0.02 deployment.
+- `scripts/deploy_growth.ts`: low/zero-fee instance. Prints a dry summary and deploys only with `CONFIRM_DEPLOY=yes`. Writes `deployments/<network>-growth.json` and never overwrites an existing record.
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
+## License
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+MIT
